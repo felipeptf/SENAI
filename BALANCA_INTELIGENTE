@@ -1,0 +1,215 @@
+/*
+Autor: FelipeFernandes
+E-mail: felipe.fernandes@senairs.org.br
+Data: 11/12/2017
+Balança Inteligente
+*/
+
+ 
+//Frequência do cristal oscilador externo
+
+#define _XTAL_FREQ 8000000
+#define F_ESCALA 20.0
+#define CELULA 0
+#define POT 1
+#define BOM PORTCbits.RC0 
+#define RUIM PORTCbits.RC1 
+#define SOBREPESO PORTCbits.RC2 
+#define CONFIRMA PORTBbits.RB0
+#define TOLERANCIA 0.2
+#define TEMPO_PULSO 500
+#define TEMPO1 500
+#define TEMPO2 1000
+#define TEMPO3 4000
+
+
+//Biblioteca padrão C ANSI
+
+#include <stdio.h> 
+#include <stdlib.h>
+#include "lcd4bit.h"
+
+//Biblioteca padrão do compilador XC8
+
+#include <xc.h> 
+
+void __espera_ms(unsigned int t)
+{
+    unsigned int x=0;
+    for(x=0;x<t;x++)
+        __delay_ms(1);
+}
+
+//Retorna com leitura da célula de carga de 0 a 20Kg
+float leitura_celula(int canal)
+{
+    float conversao=0; //Recebe o valor do A/D:  0..1023
+    float resultado=0; //Valor do A/D convertido em Kg
+    
+    ADCON0bits.ADON=1; //Liga conversor analógico
+    ADCON0bits.CHS=canal; //Seleciona o canal 0 para ser convertido
+    __delay_us(40); //Espera o capacitor C_HOLD carregar
+    ADCON0bits.GO=1; //Inicia a conversão A/D do canal selecionado anteriormente
+    while (ADCON0bits.nDONE); //Espera enquanto a conversão não terminou
+    conversao=(ADRESH<<8)+ADRESL; //valor recebe ADRESH deslocado 8 bits + ADRESL
+    ADCON0bits.GO=0; //Desliga o conversor A/D
+    resultado=(conversao*20)/1023; //Converte a leitura do A/D em peso de 0 a 20Kg
+    return(resultado);
+}
+
+
+bit b_subida=0; //Variável de borda de subida
+bit calibracao=0;
+bit setpoint=0;
+bit tara=0;
+
+void main() {
+    float peso=0; //Armazena valor de peso do A/D
+    float peso_desejado=0; //Armazena valor de set-point
+        
+    init_lcd(_XTAL_FREQ); //Inicia LCD
+    clear_lcd(); //Limpa LCD
+    cursor_off(); //Desativa cursor do LCD
+    char texto[17];
+    
+    sprintf(texto,"INICIALIZANDO");
+    lprintf_lin_col(texto,1,1);
+    __espera_ms(TEMPO_PULSO);
+    sprintf(texto,"INICIALIZANDO.");
+    lprintf_lin_col(texto,1,1);
+    __espera_ms(TEMPO_PULSO);
+    sprintf(texto,"INICIALIZANDO..");
+    lprintf_lin_col(texto,1,1);
+    __espera_ms(TEMPO_PULSO);
+    sprintf(texto,"INICIALIZANDO...");
+    lprintf_lin_col(texto,1,1);
+    __espera_ms(TEMPO_PULSO);
+    
+    //ATIVA AS SAÍDAS DO MCU
+    TRISBbits.RB0=1; //Botão confirma
+    TRISCbits.RC0=0; //Sinal peso bom
+    TRISCbits.RC1=0; //Sinal peso ruim
+    TRISCbits.RC2=0; //Sinal sobrepeso
+       
+    //Configuração da conversão A/D
+    ADCON2bits.ADCS0=1; //Ajusta relógio de referência da conversão A/D
+    ADCON2bits.ADCS1=0; //Clock conversion em FOSC/16 de acordo
+    ADCON2bits.ADCS2=1; //com datasheet pg. 267 para o XTAL 20MHz
+    ADCON1bits.PCFG=14; //AN0 como analógico. Demais pinos digitais
+    ADCON2bits.ADFM=1; //bits justificados a direita
+    
+    
+    //Inicia calibração
+    clear_lcd();
+    sprintf(texto,"CALIBRANDO...");
+    lprintf_lin_col(texto,1,1);     
+    
+    while (calibracao==0)
+    {
+        peso=leitura_celula(CELULA); //Faz leitura do canal 0 e armazena o valor da célula de carga em peso
+        sprintf(texto, "Peso = %.2f Kg", peso);
+        lprintf_lin_col(texto,2,1);
+        
+        if (CONFIRMA)
+            calibracao=1;
+    }
+    clear_lcd();
+    sprintf(texto, "CONFIRMADO!");
+    lprintf_lin_col(texto,1,1);
+    sprintf(texto, "RETIRAR DEDO!");
+    lprintf_lin_col(texto,2,1);
+    while (CONFIRMA); //Aguarda retirar o dedo para avançar
+    clear_lcd();
+    
+    //Inicia setpoint
+    clear_lcd();
+    sprintf(texto,"SET-POINT...");
+    lprintf_lin_col(texto,1,1); 
+    
+    //Escolhe caixa desejada
+    while (setpoint==0)
+    {
+        peso_desejado=leitura_celula(CELULA);
+        sprintf(texto, "Peso = %.2f Kg", peso_desejado);
+        lprintf_lin_col(texto,2,1);
+        
+        if (CONFIRMA)
+            setpoint=1;
+        
+    }
+    
+    clear_lcd();
+    sprintf(texto, "CONFIRMADO!");
+    lprintf_lin_col(texto,1,1);
+    sprintf(texto, "RETIRAR DEDO!");
+    lprintf_lin_col(texto,2,1);
+    while (CONFIRMA); //Aguarda retirar o dedo para avançar
+    
+    clear_lcd();
+    sprintf(texto, "INICIA CICLO");
+    lprintf_lin_col(texto,1,1);
+    __espera_ms(TEMPO2);
+    clear_lcd();
+       
+    //Inicia rotina principal
+    while (1)
+    {
+        peso=leitura_celula(CELULA);
+        sprintf(texto, "SP: %.2f Kg", peso_desejado);
+        lprintf_lin_col(texto,1,1);
+        sprintf(texto, "LEITURA: %.2f Kg", peso);
+        lprintf_lin_col(texto,2,1);
+        __espera_ms(TEMPO1);
+        clear_lcd();
+              
+        //Detecta peça
+        if (peso>=0.25)
+        {
+            clear_lcd();
+            sprintf(texto, "PECA DETECTADA!");
+            lprintf_lin_col(texto,1,1);
+            __espera_ms(TEMPO2);
+            
+            //Refaz leitura estável
+            peso=leitura_celula(CELULA);
+            sprintf(texto, "SP: %.2f Kg", peso_desejado);
+            lprintf_lin_col(texto,1,1);
+            sprintf(texto, "LEITURA: %.2f Kg", peso);
+            __espera_ms(TEMPO1);
+            
+            if ((peso>peso_desejado-TOLERANCIA)&&(peso<peso_desejado+TOLERANCIA))
+            {   
+                clear_lcd();
+                sprintf(texto, "PESO OK!");
+                lprintf_lin_col(texto,1,1);
+                BOM=1;
+                __espera_ms(TEMPO1);
+                BOM=0;
+            
+                while (peso<(peso_desejado+3))
+                {
+                    peso=leitura_celula(CELULA);
+                    sprintf(texto, "SP: %.2f Kg", peso_desejado);
+                    lprintf_lin_col(texto,1,1);
+                    sprintf(texto, "LEITURA: %.2f Kg", peso);
+                }
+                clear_lcd();
+                sprintf(texto, "CARIMBANDO!");
+                lprintf_lin_col(texto,1,1);
+                SOBREPESO=1;
+                __espera_ms(TEMPO1);
+                SOBREPESO=0;
+                __espera_ms(TEMPO3); //Aguarda caixa sair da posição
+            } else
+            {
+                clear_lcd();
+                sprintf(texto, "REJEITADA!");
+                lprintf_lin_col(texto,1,1);
+                RUIM=1;
+                __espera_ms(TEMPO1);
+                RUIM=0;
+                __espera_ms(TEMPO3); //Aguarda caixa sair da posição
+            }
+        }
+    }
+}
